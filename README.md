@@ -1,8 +1,9 @@
 <p align="center">
   <img src="com.uptime.monitor.ulanziPlugin/assets/marketing/banner.png" alt="Uptime Monitor" width="100%">
+  <img src="com.uptime.monitor.ulanziPlugin/assets/marketing/categoryIcon.png" alt="Uptime Monitor" width="20%">
 </p>
 
-<h1 align="center">📡 Uptime Monitor — Ulanzi Deck Plugin</h1>
+<h1 align="center">Uptime Monitor — Ulanzi Deck Plugin</h1>
 
 <p align="center">
   <b>Watch any website, API or server live from a key.</b><br>
