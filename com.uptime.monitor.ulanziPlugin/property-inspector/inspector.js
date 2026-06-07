@@ -2,7 +2,7 @@ let ACTION_SETTING = {};
 let form = null;
 
 // localized status labels pushed to the key
-let LABELS = { up: 'UP', slow: 'SLOW', down: 'DOWN', checking: 'CHECK', uptime: 'uptime', waiting: 'waiting…' };
+let LABELS = { up: 'UP', slow: 'SLOW', down: 'DOWN', checking: 'CHECK', uptime: 'uptime', waiting: 'waiting…', pausedLabel: 'PAUSED' };
 // localized notification title + messages pushed to the backend
 let NOTIFY = { notifyTitle: 'Uptime Monitor', msgDown: '{host} is down', msgUp: '{host} is back online' };
 
@@ -36,10 +36,12 @@ $UD.onConnected(() => {
 
   buildSwatches();
   buildSeg();
+  buildTypeSeg();
 
   form.addEventListener('input', Utils.debounce(collectAndSend, 200));
   // selects/hidden don't always fire input in the webview
-  ['intervalSec', 'warnMs', 'timeoutMs', 'url', 'notify'].forEach(id => {
+  ['intervalSec', 'warnMs', 'timeoutMs', 'url', 'notify', 'paused',
+   'method', 'keywordMode', 'okCodes', 'keyword', 'header', 'basicAuth', 'sslWarnDays', 'webhookUrl', 'repeatAlertMin'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', collectAndSend);
   });
@@ -92,6 +94,24 @@ function selectGraphMode(m) {
 }
 function highlightSeg(m) {
   document.querySelectorAll('#graph-seg button').forEach(b => b.classList.toggle('active', parseInt(b.dataset.mode) === m));
+}
+
+// ── check-type segmented buttons (HTTP / TCP port) ────────────────────────────
+function buildTypeSeg() {
+  document.querySelectorAll('#type-seg button').forEach(b => {
+    b.addEventListener('click', () => selectType(b.dataset.type));
+  });
+  highlightType(document.getElementById('checkType').value || 'http');
+}
+function selectType(t) {
+  document.getElementById('checkType').value = t;
+  highlightType(t);
+  collectAndSend();
+}
+function highlightType(t) {
+  document.querySelectorAll('#type-seg button').forEach(b => b.classList.toggle('active', b.dataset.type === t));
+  const inp = document.getElementById('url');
+  if (inp) inp.placeholder = (t === 'tcp') ? 'db.example.com:5432' : 'example.com';
 }
 function highlightTheme(name) {
   document.querySelectorAll('.theme-swatch').forEach(el => el.classList.toggle('active', el.dataset.theme === name));
@@ -147,10 +167,12 @@ function renderPreview() {
   const warnMs = parseInt(document.getElementById('warnMs').value) || 800;
 
   const graphMode = parseInt(document.getElementById('graphMode').value) || 0;
+  const paused = document.getElementById('paused').checked;
+  const status = paused ? 'paused' : pv.status;
   el.innerHTML = buildSVG({
-    host, urlText, status: pv.status, lastMs: pv.status === 'down' ? null : currentLastMs(),
+    host, urlText, status, lastMs: status === 'down' || status === 'paused' ? null : currentLastMs(),
     history: pv.history, warnMs, theme, graphMode, labels: LABELS,
-    blinkOn: pv.blink, animFrame: pv.frame
+    blinkOn: paused ? false : pv.blink, animFrame: pv.frame
   });
 }
 
@@ -225,8 +247,9 @@ function buildSVG(o) {
       `<text x="${x}" y="${DOMY}" fill="${domColor}" font-size="${DOMF}" font-family="Arial, Helvetica, sans-serif">${fullDom}</text>` +
       `<text x="${x2}" y="${DOMY}" fill="${domColor}" font-size="${DOMF}" font-family="Arial, Helvetica, sans-serif">${fullDom}</text>`;
   }
-  const statusText = o.status === 'down' ? (L.down || 'DOWN') : o.status === 'slow' ? (L.slow || 'SLOW') : o.status === 'up' ? (L.up || 'UP') : (L.checking || 'CHECK');
-  let bigText = o.status === 'down' ? (L.down || 'DOWN') : (o.lastMs == null ? '···' : `${o.lastMs} ms`);
+  const statusText = o.status === 'down' ? (L.down || 'DOWN') : o.status === 'slow' ? (L.slow || 'SLOW') : o.status === 'up' ? (L.up || 'UP') : o.status === 'paused' ? (L.pausedLabel || 'PAUSED') : (L.checking || 'CHECK');
+  let bigText = o.status === 'down' ? (L.down || 'DOWN') : o.status === 'paused' ? (L.pausedLabel || 'PAUSED') : (o.lastMs == null ? '···' : `${o.lastMs} ms`);
+  const bigFont = o.status === 'down' ? 40 : (o.status === 'paused' ? 28 : 44);
 
   const gx0 = 22, gx1 = 234, gy0 = 150, gy1 = 212, gw = gx1 - gx0, gh = gy1 - gy0;
   const hist = (o.history || []).slice(-32);
@@ -243,18 +266,26 @@ function buildSVG(o) {
     baseline = `<line x1="${gx0}" y1="${gy1}" x2="${gx1}" y2="${gy1}" stroke="${flash ? t.bg : t.track}" stroke-width="2"/>`;
   }
   const okCount = hist.filter(h => h.ok).length;
-  const up = hist.length ? `${Math.round((okCount / hist.length) * 100)}%` : '—';
+  const upPct = hist.length ? Math.round((okCount / hist.length) * 100) : null;
+  const okMs = hist.filter(h => h.ok).map(h => h.ms);
+  const avg = okMs.length ? Math.round(okMs.reduce((a, b) => a + b, 0) / okMs.length) : null;
+  let p95 = null;
+  if (okMs.length >= 5) { const s = [...okMs].sort((a, b) => a - b); p95 = s[Math.min(s.length - 1, Math.floor(s.length * 0.95))]; }
   const dot = `<circle cx="30" cy="34" r="7" fill="${accent}"/>`;
+  const topRight = (!flash && upPct != null) ? `<text x="234" y="40" text-anchor="end" fill="${accent}" font-size="17" font-weight="bold" font-family="Arial, Helvetica, sans-serif">24h ${upPct}%</text>` : '';
+  const botLeft = (avg != null) ? `~${avg} ms` : '';
+  const botRight = (p95 != null) ? `p95 ${p95}` : '';
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
   ${gradDef ? `<defs>${gradDef}</defs>` : ''}
   <rect width="256" height="256" rx="36" fill="${bg}"/>${dot}
   <text x="46" y="40" fill="${accent}" font-size="20" font-weight="bold" font-family="Arial, Helvetica, sans-serif" letter-spacing="1" opacity="${slowPulse.toFixed(2)}">${esc(statusText)}</text>
+  ${topRight}
   ${domainSvg}
-  <text x="128" y="120" text-anchor="middle" fill="${fgMain}" font-size="${o.status === 'down' ? 40 : 44}" font-weight="bold" font-family="Arial, Helvetica, sans-serif">${esc(bigText)}</text>
+  <text x="128" y="120" text-anchor="middle" fill="${fgMain}" font-size="${bigFont}" font-weight="bold" font-family="Arial, Helvetica, sans-serif">${esc(bigText)}</text>
   ${baseline}${threshLine}${graph}${peakLabel}${minimalBody}
-  <text x="22" y="240" fill="${flash ? t.bg : t.muted}" font-size="18" font-family="Arial, Helvetica, sans-serif">${esc(L.uptime || 'uptime')}</text>
-  <text x="234" y="240" text-anchor="end" fill="${flash ? t.bg : accent}" font-size="20" font-weight="bold" font-family="Arial, Helvetica, sans-serif">${esc(up)}</text>
+  <text x="22" y="240" fill="${flash ? t.bg : t.muted}" font-size="17" font-family="Arial, Helvetica, sans-serif">${esc(botLeft)}</text>
+  <text x="234" y="240" text-anchor="end" fill="${flash ? t.bg : accent}" font-size="17" font-weight="bold" font-family="Arial, Helvetica, sans-serif">${esc(botRight)}</text>
 </svg>`;
 }
 
@@ -276,7 +307,8 @@ async function loadTranslations() {
       down:     loc['DOWN']     || LABELS.down,
       checking: loc['CHECK']    || LABELS.checking,
       uptime:   loc['uptime']   || LABELS.uptime,
-      waiting:  loc['waiting']  || LABELS.waiting
+      waiting:  loc['waiting']  || LABELS.waiting,
+      pausedLabel: loc['PAUSED'] || LABELS.pausedLabel
     };
     NOTIFY = {
       notifyTitle: data?.Name        || NOTIFY.notifyTitle,
@@ -295,7 +327,9 @@ function collectAndSend() {
   const values = Utils.getFormValue(form);
   ACTION_SETTING = { ...ACTION_SETTING, ...values };
   ACTION_SETTING.graphMode = parseInt(document.getElementById('graphMode').value) || 0;
+  ACTION_SETTING.checkType = document.getElementById('checkType').value || 'http';
   ACTION_SETTING.notify = !!document.getElementById('notify').checked;
+  ACTION_SETTING.paused = !!document.getElementById('paused').checked;
   renderPreview();
   $UD.sendParamFromPlugin({ ...ACTION_SETTING, ...LABELS, ...NOTIFY });
 }
@@ -313,6 +347,10 @@ function applySettings(params) {
   document.getElementById('graphMode').value = gm;
   highlightSeg(gm);
   document.getElementById('notify').checked = !!ACTION_SETTING.notify;
+  document.getElementById('paused').checked = !!ACTION_SETTING.paused;
+  const ct = (ACTION_SETTING.checkType === 'tcp') ? 'tcp' : 'http';
+  document.getElementById('checkType').value = ct;
+  highlightType(ct);
   const theme = ACTION_SETTING.theme || 'midnight';
   document.getElementById('theme').value = theme;
   highlightTheme(theme);

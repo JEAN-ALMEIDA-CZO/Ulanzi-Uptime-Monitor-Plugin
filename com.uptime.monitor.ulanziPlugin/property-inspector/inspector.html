@@ -71,6 +71,14 @@
     .seg button:hover { border-color: var(--accent); }
     .seg button.active { background: var(--accent); border-color: var(--accent); color: #06210f; }
 
+    /* advanced collapsible */
+    .adv { border-top: 1px solid #2a2a2a; }
+    .adv summary { cursor: pointer; padding: 12px 16px 4px; font-size: 8.5pt; font-weight: 700;
+      letter-spacing: 1px; text-transform: uppercase; color: var(--accent); list-style: none; outline: none; }
+    .adv summary::-webkit-details-marker { display: none; }
+    .adv summary::before { content: "\25B8  "; }
+    .adv[open] summary::before { content: "\25BE  "; }
+
     /* toggle switch (udpi.css hides raw checkboxes) */
     .switch { position: relative; width: 40px; height: 22px; flex: 0 0 40px; }
     .switch input { display: none; }
@@ -96,7 +104,24 @@
       <div class="section">
         <div class="section-title" data-localize>Monitor</div>
         <div class="row">
-          <div class="label" data-localize>URL / Domain</div>
+          <div class="label" data-localize>Pause</div>
+          <div class="control">
+            <label class="switch"><input type="checkbox" id="paused" name="paused"><span class="track"></span></label>
+            <span class="unit" data-localize>maintenance mode</span>
+          </div>
+        </div>
+        <div class="row">
+          <div class="label" data-localize>Type</div>
+          <div class="control">
+            <div class="seg" id="type-seg" style="padding:0;flex:1;">
+              <button type="button" data-type="http" data-localize>HTTP</button>
+              <button type="button" data-type="tcp" data-localize>Port (TCP)</button>
+            </div>
+          </div>
+        </div>
+        <input type="hidden" id="checkType" name="checkType" value="http">
+        <div class="row">
+          <div class="label" id="url-label" data-localize>URL / Domain</div>
           <div class="control">
             <input type="text" id="url" name="url" placeholder="example.com" autocomplete="off" spellcheck="false">
           </div>
@@ -145,6 +170,48 @@
           </div>
         </div>
       </div>
+
+      <details class="adv">
+        <summary data-localize>Advanced (HTTP)</summary>
+        <div class="row">
+          <div class="label" data-localize>Method</div>
+          <div class="control"><select id="method" name="method"><option value="GET">GET</option><option value="HEAD">HEAD</option></select></div>
+        </div>
+        <div class="row">
+          <div class="label" data-localize>Expected status</div>
+          <div class="control"><input type="text" id="okCodes" name="okCodes" placeholder="default 200-399" data-localize autocomplete="off" spellcheck="false"></div>
+        </div>
+        <div class="row">
+          <div class="label" data-localize>Keyword</div>
+          <div class="control">
+            <input type="text" id="keyword" name="keyword" placeholder="text in page" data-localize autocomplete="off" spellcheck="false">
+            <select id="keywordMode" name="keywordMode" style="width:auto;flex:0 0 auto;">
+              <option value="contain" data-localize>contains</option>
+              <option value="absent" data-localize>absent</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="label" data-localize>Header</div>
+          <div class="control"><input type="text" id="header" name="header" placeholder="X-Api-Key: abc123" autocomplete="off" spellcheck="false"></div>
+        </div>
+        <div class="row">
+          <div class="label" data-localize>Basic auth</div>
+          <div class="control"><input type="text" id="basicAuth" name="basicAuth" placeholder="user:pass" data-localize autocomplete="off" spellcheck="false"></div>
+        </div>
+        <div class="row">
+          <div class="label" data-localize>SSL warn</div>
+          <div class="control"><input type="number" id="sslWarnDays" name="sslWarnDays" min="0" max="365" value="14"><span class="unit" data-localize>days (0=off)</span></div>
+        </div>
+        <div class="row">
+          <div class="label" data-localize>Webhook URL</div>
+          <div class="control"><input type="text" id="webhookUrl" name="webhookUrl" placeholder="Slack / Discord URL" data-localize autocomplete="off" spellcheck="false"></div>
+        </div>
+        <div class="row">
+          <div class="label" data-localize>Repeat alert</div>
+          <div class="control"><input type="number" id="repeatAlertMin" name="repeatAlertMin" min="0" max="1440" value="0"><span class="unit" data-localize>min (0=off)</span></div>
+        </div>
+      </details>
 
       <div class="section">
         <div class="section-title" data-localize>Theme</div>

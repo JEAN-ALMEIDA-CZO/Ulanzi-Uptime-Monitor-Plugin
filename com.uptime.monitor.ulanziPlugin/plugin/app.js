@@ -1,6 +1,7 @@
 import UlanzideckApi from '../libs/node/ulanzideckApi.js';
 import http from 'http';
 import https from 'https';
+import net from 'net';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -9,7 +10,17 @@ import { exec, execFile } from 'child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ICON_DIR = path.join(__dirname, '..', 'assets', 'icons');
-const PLUGIN_VERSION = '1.0.0';
+const PLUGIN_VERSION = '1.2.0';
+
+// Persistent data dir (hourly uptime buckets survive reloads → 24h / 7d windows)
+const DATA_DIR = (os.platform() === 'darwin')
+  ? path.join(os.homedir(), 'Library', 'Application Support', 'Ulanzi', 'UlanziDeck', 'Plugins', 'com.uptime.monitor.deck')
+  : path.join(process.env.APPDATA || os.homedir(), 'Ulanzi', 'UlanziDeck', 'Plugins', 'com.uptime.monitor.deck');
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
+function bucketFile(key) {
+  const safe = String(key || '').replace(/[^a-z0-9]+/gi, '_').slice(0, 60) || 'x';
+  return path.join(DATA_DIR, 'h_' + safe + '.json');
+}
 
 // notification thumbnails (raster — required by Windows toast + macOS notifier)
 const NOTIFY_ICONS = {
@@ -62,33 +73,113 @@ function normalizeUrl(url) {
   return /^https?:\/\//i.test(url) ? url : 'https://' + url;
 }
 
-// One reachability check via http/https (no external dependency — works on any
-// Node version, Windows + macOS). Resolves { ok, ms, code }.
-function checkUrl(rawUrl, timeoutMs) {
+// Build a predicate from an "expected status" spec: "" = default (<400),
+// "200,204" = exact list, "200-299" = ranges, mixable.
+function buildOkCode(spec) {
+  spec = String(spec || '').trim();
+  if (!spec) return (c) => c > 0 && c < 400;
+  const ranges = spec.split(',').map(s => s.trim()).filter(Boolean).map(p => {
+    const m = p.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (m) return [parseInt(m[1]), parseInt(m[2])];
+    const n = parseInt(p); return Number.isFinite(n) ? [n, n] : null;
+  }).filter(Boolean);
+  if (!ranges.length) return (c) => c > 0 && c < 400;
+  return (c) => ranges.some(([a, b]) => c >= a && c <= b);
+}
+
+// Fire-and-forget JSON POST to a webhook (Slack/Discord/Teams/generic).
+function postWebhook(url, payload) {
+  try {
+    const u = new URL(url);
+    const lib = u.protocol === 'https:' ? https : http;
+    const data = JSON.stringify(payload);
+    const req = lib.request(u, { method: 'POST', timeout: 8000, headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } }, (res) => res.destroy());
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => {});
+    req.write(data); req.end();
+  } catch (e) { /* ignore */ }
+}
+
+// One HTTP(S) check. Options: timeoutMs, method, headers, basicAuth ("user:pass"),
+// keyword + keywordMode ('contain'|'absent'), isOkCode(predicate). Resolves
+// { ok, ms, code, certDays, reason }.
+function checkUrl(rawUrl, o) {
+  o = o || {};
+  const timeoutMs = o.timeoutMs || 8000;
   return new Promise((resolve) => {
     let u;
     try { u = new URL(normalizeUrl(rawUrl)); }
-    catch (e) { return resolve({ ok: false, ms: 0, code: 0, err: 'badurl' }); }
+    catch (e) { return resolve({ ok: false, ms: 0, code: 0, err: 'badurl', reason: 'badurl' }); }
 
-    const lib = u.protocol === 'https:' ? https : http;
+    const isHttps = u.protocol === 'https:';
+    const lib = isHttps ? https : http;
     const start = Date.now();
     let settled = false;
     const done = (r) => { if (!settled) { settled = true; resolve(r); } };
 
-    const req = lib.request(
-      u,
-      { method: 'GET', timeout: timeoutMs, headers: { 'User-Agent': 'UlanziUptimeMonitor/1.0', 'Accept': '*/*' } },
-      (res) => {
-        const ms = Date.now() - start;
-        const code = res.statusCode || 0;
-        res.destroy();
-        // any response under 400 = up; 4xx/5xx still "responding" but treated as down
-        done({ ok: code > 0 && code < 400, ms, code });
+    const headers = Object.assign({ 'User-Agent': 'UlanziUptimeMonitor/1.1', 'Accept': '*/*' }, o.headers || {});
+    if (o.basicAuth) headers['Authorization'] = 'Basic ' + Buffer.from(String(o.basicAuth)).toString('base64');
+
+    const needBody = !!o.keyword;
+    const method = needBody ? 'GET' : (o.method || 'GET');
+    const isOkCode = o.isOkCode || ((c) => c > 0 && c < 400);
+
+    const req = lib.request(u, { method, timeout: timeoutMs, headers }, (res) => {
+      const code = res.statusCode || 0;
+      let certDays = null;
+      if (isHttps && res.socket && res.socket.getPeerCertificate) {
+        try {
+          const c = res.socket.getPeerCertificate();
+          if (c && c.valid_to) certDays = Math.floor((Date.parse(c.valid_to) - Date.now()) / 86400000);
+        } catch (e) {}
       }
-    );
-    req.on('timeout', () => { req.destroy(); done({ ok: false, ms: timeoutMs, code: 0, err: 'timeout' }); });
-    req.on('error', () => done({ ok: false, ms: Date.now() - start, code: 0, err: 'error' }));
+      const codeOk = isOkCode(code);
+
+      if (!needBody) {
+        res.destroy();
+        done({ ok: codeOk, ms: Date.now() - start, code, certDays, reason: codeOk ? '' : 'status' });
+        return;
+      }
+      // read body (capped) for the keyword check
+      let body = '', bytes = 0; const CAP = 512 * 1024;
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { if (bytes < CAP) { body += chunk; bytes += chunk.length; } });
+      res.on('end', () => {
+        const has = body.toLowerCase().includes(String(o.keyword).toLowerCase());
+        const kwOk = (o.keywordMode === 'absent') ? !has : has;
+        const ok = codeOk && kwOk;
+        done({ ok, ms: Date.now() - start, code, certDays, reason: ok ? '' : (!codeOk ? 'status' : 'keyword') });
+      });
+      res.on('error', () => done({ ok: false, ms: Date.now() - start, code, certDays, reason: 'error' }));
+    });
+    req.on('timeout', () => { req.destroy(); done({ ok: false, ms: timeoutMs, code: 0, err: 'timeout', reason: 'timeout' }); });
+    req.on('error', () => done({ ok: false, ms: Date.now() - start, code: 0, err: 'error', reason: 'error' }));
     req.end();
+  });
+}
+
+// "host:port" → { host, port }. Accepts a bare port-bearing address (no scheme).
+function parseHostPort(raw) {
+  let s = String(raw || '').trim().replace(/^[a-z]+:\/\//i, '').replace(/\/.*$/, '');
+  const m = s.match(/^(.+?):(\d{1,5})$/);
+  if (m) return { host: m[1], port: parseInt(m[2]) };
+  return { host: s, port: null };
+}
+
+// Raw TCP port reachability via net.connect — measures the connect (handshake)
+// time. Connected = port open (up); refused/timeout = down. Works for any TCP
+// service (SSH, databases, mail, game servers…), cross-platform, no dependency.
+function checkTcp(host, port, timeoutMs) {
+  return new Promise((resolve) => {
+    if (!host || !port) return resolve({ ok: false, ms: 0, code: 0, err: 'badaddr' });
+    const start = Date.now();
+    let settled = false;
+    const done = (r) => { if (!settled) { settled = true; try { sock.destroy(); } catch (e) {} resolve(r); } };
+    const sock = net.connect({ host, port });
+    sock.setTimeout(timeoutMs);
+    sock.on('connect', () => done({ ok: true, ms: Date.now() - start, code: 0 }));
+    sock.on('timeout', () => done({ ok: false, ms: timeoutMs, code: 0, err: 'timeout' }));
+    sock.on('error', () => done({ ok: false, ms: Date.now() - start, code: 0, err: 'error' }));
   });
 }
 
@@ -379,13 +470,16 @@ function generateSVG(o) {
   const statusText = o.status === 'down' ? (L.down || 'DOWN')
                    : o.status === 'slow' ? (L.slow || 'SLOW')
                    : o.status === 'up'   ? (L.up || 'UP')
+                   : o.status === 'paused' ? (L.paused || 'PAUSED')
                    : (L.checking || 'CHECK');
 
   // central value
   let bigText;
   if (o.status === 'down') bigText = (L.down || 'DOWN');
+  else if (o.status === 'paused') bigText = (L.paused || 'PAUSED');
   else if (o.status === 'checking' || o.lastMs == null) bigText = '···';
   else bigText = `${o.lastMs} ms`;
+  const bigFont = o.status === 'down' ? 40 : (o.status === 'paused' ? 28 : 44);
 
   // ── graph (real-time latency history) ──
   const gx0 = 22, gx1 = 234, gy0 = 150, gy1 = 212;
@@ -399,17 +493,26 @@ function generateSVG(o) {
   const gm = (o.graphMode != null) ? o.graphMode : (o.pingGraph ? 1 : 0);
   let graph = '', threshLine = '', peakLabel = '', gradDef = '', baseline = '', minimalBody = '';
   if (gm === 2) {
-    // minimal: drop the chart, show a big status word in its place
-    minimalBody = `<text x="128" y="190" text-anchor="middle" fill="${accent}" font-size="34" font-weight="bold" font-family="Arial, Helvetica, sans-serif" letter-spacing="1" opacity="${slowPulse.toFixed(2)}">${esc(statusText)}</text>`;
+    // minimal: drop the chart, show a big status word + the 7-day uptime
+    const u7 = (o.stats7 && o.stats7.uptime != null) ? `<text x="128" y="216" text-anchor="middle" fill="${t.muted}" font-size="14" font-family="Arial, Helvetica, sans-serif">7d ${o.stats7.uptime}%</text>` : '';
+    minimalBody = `<text x="128" y="188" text-anchor="middle" fill="${accent}" font-size="34" font-weight="bold" font-family="Arial, Helvetica, sans-serif" letter-spacing="1" opacity="${slowPulse.toFixed(2)}">${esc(statusText)}</text>${u7}`;
   } else {
     const g = buildGraph({ hist, warn, okVals, peak, gx0, gx1, gy0, gy1, gw, gh, t, flash, statusColor, pingGraph: gm === 1, waiting: esc(L.waiting || 'waiting…') });
     graph = g.graph; threshLine = g.threshLine; peakLabel = g.peakLabel; gradDef = g.gradDef;
     baseline = `<line x1="${gx0}" y1="${gy1}" x2="${gx1}" y2="${gy1}" stroke="${flash ? t.bg : t.track}" stroke-width="2"/>`;
   }
 
-  // uptime %
-  const up = (o.uptimePct != null) ? `${o.uptimePct}%` : '—';
-  const upLabel = esc(L.uptime || 'uptime');
+  // top-right: 24h uptime (or the SSL badge when the cert is expiring)
+  const s24 = o.stats24 || {};
+  const topRight = flash ? ''
+    : (o.certWarn
+        ? `<text x="234" y="40" text-anchor="end" fill="${t.slow}" font-size="16" font-weight="bold" font-family="Arial, Helvetica, sans-serif">SSL ${o.certDays}d</text>`
+        : (s24.uptime != null
+            ? `<text x="234" y="40" text-anchor="end" fill="${accent}" font-size="17" font-weight="bold" font-family="Arial, Helvetica, sans-serif">24h ${s24.uptime}%</text>`
+            : ''));
+  // bottom row: latency stats, bigger so they're readable (avg + p95)
+  const botLeft  = (s24.avg != null) ? `~${s24.avg} ms` : '';
+  const botRight = (o.p95 != null) ? `p95 ${o.p95}` : (o.uptimePct != null && s24.uptime == null ? `${o.uptimePct}%` : '');
 
   // status dot
   const dot = `<circle cx="30" cy="34" r="7" fill="${accent}">${o.status === 'up' || o.status === 'slow' ? `<animate attributeName="opacity" values="1;0.4;1" dur="1.6s" repeatCount="indefinite"/>` : ''}</circle>`;
@@ -419,15 +522,16 @@ function generateSVG(o) {
   <rect width="256" height="256" rx="36" fill="${bg}"/>
   ${dot}
   <text x="46" y="40" fill="${accent}" font-size="20" font-weight="bold" font-family="Arial, Helvetica, sans-serif" letter-spacing="1" opacity="${slowPulse.toFixed(2)}">${esc(statusText)}</text>
+  ${topRight}
   ${domainSvg}
-  <text x="128" y="120" text-anchor="middle" fill="${fgMain}" font-size="${o.status === 'down' ? 40 : 44}" font-weight="bold" font-family="Arial, Helvetica, sans-serif">${esc(bigText)}</text>
+  <text x="128" y="120" text-anchor="middle" fill="${fgMain}" font-size="${bigFont}" font-weight="bold" font-family="Arial, Helvetica, sans-serif">${esc(bigText)}</text>
   ${baseline}
   ${threshLine}
   ${graph}
   ${peakLabel}
   ${minimalBody}
-  <text x="22" y="240" fill="${flash ? t.bg : t.muted}" font-size="18" font-family="Arial, Helvetica, sans-serif">${upLabel}</text>
-  <text x="234" y="240" text-anchor="end" fill="${flash ? t.bg : accent}" font-size="20" font-weight="bold" font-family="Arial, Helvetica, sans-serif">${esc(up)}</text>
+  <text x="22" y="240" fill="${flash ? t.bg : t.muted}" font-size="17" font-family="Arial, Helvetica, sans-serif">${esc(botLeft)}</text>
+  <text x="234" y="240" text-anchor="end" fill="${flash ? t.bg : accent}" font-size="17" font-weight="bold" font-family="Arial, Helvetica, sans-serif">${esc(botRight)}</text>
 </svg>`;
 }
 
@@ -438,6 +542,7 @@ class UptimeMonitor {
     this.$UD = $UD;
     this.config = {
       url: '',
+      checkType: 'http',   // 'http' = HTTP/HTTPS · 'tcp' = raw TCP port
       intervalSec: 5,      // real-time default (min 3s)
       timeoutMs: 8000,
       warnMs: 800,
@@ -447,11 +552,30 @@ class UptimeMonitor {
       notifyTitle: 'Uptime Monitor',
       msgDown: '{host} is down',
       msgUp: '{host} is back online',
+      // ── advanced (HTTP only) ──
+      method: 'GET',       // GET | HEAD
+      okCodes: '',         // expected status spec ('' = <400)
+      keyword: '',         // body must contain / be absent
+      keywordMode: 'contain', // 'contain' | 'absent'
+      header: '',          // one raw custom header "Name: Value"
+      basicAuth: '',       // "user:pass"
+      sslWarnDays: 14,     // warn (orange) when cert expires within N days (0 = off)
+      webhookUrl: '',      // POST JSON on down/recover
+      repeatAlertMin: 0,   // re-notify every N min while down (0 = off)
+      paused: false,       // maintenance mode — stop checking
       labels: { ...STATUS_LABELS_DEFAULT }
     };
     this.urlText = '';
     this.needsMarquee = false;
     this.wasDown = null;   // last known up/down state (for transition detection)
+    this.certDays = null;  // days until TLS cert expiry (https)
+    this.downAt = 0;       // timestamp of the current/last outage start
+    this.lastDownDur = 0;  // duration (ms) of the last completed outage
+    this.lastAlertAt = 0;  // last time a down alert was sent (for repeat alerts)
+    this.lastReason = '';  // why the last check failed (status/keyword/timeout)
+    this.buckets = [];     // persisted hourly uptime buckets (24h / 7d windows)
+    this.recentMs = [];    // in-memory recent ok latencies (for p95)
+    this._saveTimer = null;
     this.history = [];          // [{ ok, ms }] — last 32, for the graph
     this.totalChecks = 0;       // cumulative, for the real uptime %
     this.okChecks = 0;
@@ -472,8 +596,11 @@ class UptimeMonitor {
 
     const prevUrl = this.config.url;
     const prevInterval = this.config.intervalSec;
+    const prevType = this.config.checkType;
+    const prevPaused = this.config.paused;
 
     if (param.url != null) this.config.url = String(param.url).trim();
+    if (param.checkType != null) this.config.checkType = (param.checkType === 'tcp') ? 'tcp' : 'http';
     if (param.intervalSec != null) this.config.intervalSec = Math.max(3, parseInt(param.intervalSec) || 5);
     if (param.timeoutMs != null) this.config.timeoutMs = Math.max(1000, parseInt(param.timeoutMs) || 8000);
     if (param.warnMs != null) this.config.warnMs = Math.max(50, parseInt(param.warnMs) || 800);
@@ -485,6 +612,18 @@ class UptimeMonitor {
       // backward-compat with the old boolean toggle
       this.config.graphMode = (param.pingGraph === true || param.pingGraph === 'true' || param.pingGraph === 1 || param.pingGraph === '1') ? 1 : 0;
     }
+
+    // advanced (HTTP)
+    if (param.method != null) this.config.method = (String(param.method).toUpperCase() === 'HEAD') ? 'HEAD' : 'GET';
+    if (param.okCodes != null) this.config.okCodes = String(param.okCodes).trim();
+    if (param.keyword != null) this.config.keyword = String(param.keyword);
+    if (param.keywordMode != null) this.config.keywordMode = (param.keywordMode === 'absent') ? 'absent' : 'contain';
+    if (param.header != null) this.config.header = String(param.header).trim();
+    if (param.basicAuth != null) this.config.basicAuth = String(param.basicAuth).trim();
+    if (param.sslWarnDays != null) this.config.sslWarnDays = Math.max(0, parseInt(param.sslWarnDays) || 0);
+    if (param.webhookUrl != null) this.config.webhookUrl = String(param.webhookUrl).trim();
+    if (param.repeatAlertMin != null) this.config.repeatAlertMin = Math.max(0, parseInt(param.repeatAlertMin) || 0);
+    if (param.paused != null) this.config.paused = (param.paused === true || param.paused === 'true' || param.paused === 1 || param.paused === '1');
 
     // notifications
     if (param.notify != null) this.config.notify = (param.notify === true || param.notify === 'true' || param.notify === 1 || param.notify === '1');
@@ -498,34 +637,92 @@ class UptimeMonitor {
     ['up', 'slow', 'down', 'checking', 'uptime', 'waiting'].forEach(k => {
       if (param[k] != null) this.config.labels[k] = param[k];
     });
+    // 'paused' the boolean ≠ paused label → use a distinct param key to avoid clobbering
+    if (param.pausedLabel != null) this.config.labels.paused = param.pausedLabel;
 
-    this.host = prettyHost(this.config.url);
-    // full URL (no protocol / trailing slash) for the marquee
-    this.urlText = (this.config.url || '').replace(/^https?:\/\//i, '').replace(/\/+$/, '') || this.host;
+    if (this.config.checkType === 'tcp') {
+      const { host, port } = parseHostPort(this.config.url);
+      this.host = port ? `${host}:${port}` : (host || '—');
+      this.urlText = this.host;
+    } else {
+      this.host = prettyHost(this.config.url);
+      this.urlText = (this.config.url || '').replace(/^https?:\/\//i, '').replace(/\/+$/, '') || this.host;
+    }
     this.needsMarquee = (this.urlText.length * (17 * 0.56)) > 212;
 
-    // url changed → reset history + cumulative stats and re-check immediately
-    if (this.config.url !== prevUrl) {
+    // url or type changed → reset history + cumulative stats and re-check
+    if (this.config.url !== prevUrl || this.config.checkType !== prevType) {
       this.history = [];
       this.totalChecks = 0;
       this.okChecks = 0;
       this.status = 'checking';
       this.lastMs = null;
       this.wasDown = null;
+      this.certDays = null;
+      this.downAt = 0;
+      this.lastDownDur = 0;
+      this.recentMs = [];
+      this.buckets = this._loadBuckets();
+    }
+
+    // paused → show PAUSED and stop checking
+    if (this.config.paused) {
+      this.status = 'paused';
+      this._startLoops();
+      this.render();
+      return;
     }
 
     this._startLoops();
-    if (this.config.url && (this.config.url !== prevUrl || this.config.intervalSec !== prevInterval || this.history.length === 0)) {
+    if (this.config.url && (this.config.url !== prevUrl || this.config.checkType !== prevType || this.config.intervalSec !== prevInterval || prevPaused || this.history.length === 0)) {
+      if (this.status === 'paused') this.status = 'checking';
       this.checkNow();
     } else {
       this.render();
     }
   }
 
+  // ── persistence: hourly uptime buckets (24h / 7d) ──
+  _loadBuckets() {
+    try {
+      const arr = JSON.parse(fs.readFileSync(bucketFile(this.config.url), 'utf8'));
+      if (Array.isArray(arr)) { const cut = Math.floor(Date.now() / 3600000) - 167; return arr.filter(b => b && b.h >= cut); }
+    } catch (e) {}
+    return [];
+  }
+  _saveBuckets() {
+    if (this._saveTimer) return;
+    this._saveTimer = setTimeout(() => {
+      this._saveTimer = null;
+      try { fs.writeFileSync(bucketFile(this.config.url), JSON.stringify(this.buckets)); } catch (e) {}
+    }, 15000);
+  }
+  _recordBucket(ok, ms) {
+    const h = Math.floor(Date.now() / 3600000);
+    let b = this.buckets[this.buckets.length - 1];
+    if (!b || b.h !== h) { b = { h, ok: 0, total: 0, sumMs: 0, n: 0, min: 0, max: 0 }; this.buckets.push(b); }
+    b.total++;
+    if (ok) { b.ok++; b.sumMs += ms; b.n++; b.min = b.min ? Math.min(b.min, ms) : ms; b.max = Math.max(b.max, ms); this.recentMs.push(ms); if (this.recentMs.length > 200) this.recentMs.shift(); }
+    const cut = h - 167;
+    if (this.buckets.length > 168) this.buckets = this.buckets.filter(x => x.h >= cut);
+    this._saveBuckets();
+  }
+  _windowStats(hours) {
+    const cut = Math.floor(Date.now() / 3600000) - (hours - 1);
+    let ok = 0, total = 0, sumMs = 0, n = 0, min = 0, max = 0;
+    for (const b of this.buckets) { if (b.h < cut) continue; ok += b.ok; total += b.total; sumMs += b.sumMs; n += b.n; if (b.min) min = min ? Math.min(min, b.min) : b.min; if (b.max) max = Math.max(max, b.max); }
+    return { uptime: total ? Math.round(ok / total * 1000) / 10 : null, avg: n ? Math.round(sumMs / n) : null, min: min || null, max: max || null };
+  }
+  get p95() {
+    if (this.recentMs.length < 5) return null;
+    const s = [...this.recentMs].sort((a, b) => a - b);
+    return s[Math.min(s.length - 1, Math.floor(s.length * 0.95))];
+  }
+
   _startLoops() {
     const ms = Math.max(3, this.config.intervalSec) * 1000;
     if (this.checkTimer) clearInterval(this.checkTimer);
-    this.checkTimer = setInterval(() => this.checkNow(), ms);
+    this.checkTimer = this.config.paused ? null : setInterval(() => this.checkNow(), ms);
 
     if (!this.animTimer) {
       // ~6 fps loop (cheap; only rebuilds the icon). Runs continuously while the
@@ -540,35 +737,62 @@ class UptimeMonitor {
   }
 
   async checkNow() {
+    if (this.config.paused) { this.status = 'paused'; this.render(); return; }
     if (!this.config.url) { this.status = 'checking'; this.render(); return; }
+    // TCP mode needs an explicit port (host:port)
+    if (this.config.checkType === 'tcp' && !parseHostPort(this.config.url).port) {
+      this.status = 'checking'; this.render(); return;
+    }
     if (this._busy) return;
     this._busy = true;
     try {
-      const r = await checkUrl(this.config.url, this.config.timeoutMs);
+      let r;
+      if (this.config.checkType === 'tcp') {
+        const { host, port } = parseHostPort(this.config.url);
+        r = await checkTcp(host, port, this.config.timeoutMs);
+      } else {
+        const headers = {};
+        const hm = (this.config.header || '').match(/^([^:]+):\s*(.*)$/);
+        if (hm) headers[hm[1].trim()] = hm[2];
+        r = await checkUrl(this.config.url, {
+          timeoutMs: this.config.timeoutMs,
+          method: this.config.method,
+          headers,
+          basicAuth: this.config.basicAuth,
+          keyword: this.config.keyword,
+          keywordMode: this.config.keywordMode,
+          isOkCode: buildOkCode(this.config.okCodes)
+        });
+      }
       this.lastMs = r.ok ? r.ms : null;
       this.lastCode = r.code;
+      this.lastReason = r.reason || '';
+      this.certDays = (r.certDays != null) ? r.certDays : this.certDays;
       this.history.push({ ok: r.ok, ms: r.ms });
       if (this.history.length > MAX_HISTORY) this.history.shift();
       this.totalChecks++;
       if (r.ok) this.okChecks++;
+      this._recordBucket(r.ok, r.ms);
 
       // recent instability window (last 5 checks)
       const recent = this.history.slice(-5);
       const recentFails = recent.filter(h => !h.ok).length;
+      const certWarn = (this.config.sslWarnDays > 0 && this.certDays != null && this.certDays <= this.config.sslWarnDays);
 
       if (!r.ok) {
         this.status = 'down';
-      } else if (r.ms > this.config.warnMs || recentFails > 0) {
-        this.status = 'slow';   // responding but high latency or flapping
+      } else if (r.ms > this.config.warnMs || recentFails > 0 || certWarn) {
+        this.status = 'slow';   // responding but high latency / flapping / cert expiring
       } else {
         this.status = 'up';
       }
-      dlog(`check ${this.config.url} → ${r.ok ? 'ok' : 'fail'} ${r.ms}ms code=${r.code} status=${this.status}`);
+      dlog(`check ${this.config.url} → ${r.ok ? 'ok' : 'fail'} ${r.ms}ms code=${r.code} cert=${this.certDays} status=${this.status} reason=${r.reason || ''}`);
     } catch (e) {
       this.status = 'down';
       this.history.push({ ok: false, ms: this.config.timeoutMs });
       if (this.history.length > MAX_HISTORY) this.history.shift();
       this.totalChecks++;
+      this._recordBucket(false, this.config.timeoutMs);
       dlog(`check error: ${e.message}`);
     } finally {
       this._busy = false;
@@ -577,19 +801,62 @@ class UptimeMonitor {
     }
   }
 
-  // fire a desktop alert only on an up↔down transition (not every check)
+  // human-friendly duration (e.g. "3m 20s")
+  _fmtDur(ms) {
+    const s = Math.max(1, Math.round(ms / 1000));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60), r = s % 60;
+    if (m < 60) return r ? `${m}m ${r}s` : `${m}m`;
+    const h = Math.floor(m / 60); return `${h}h ${m % 60}m`;
+  }
+
+  // desktop alert + webhook on up↔down transition; repeat alert while down
   _maybeNotify() {
     const isDown = this.status === 'down';
-    if (this.wasDown === null) { this.wasDown = isDown; return; }  // first check: baseline, no alert
-    if (isDown === this.wasDown) return;                          // no transition
-    this.wasDown = isDown;
-    if (!this.config.notify) return;
     const host = this.host || this.urlText || '';
-    if (isDown) {
-      notifyOS(this.config.notifyTitle, (this.config.msgDown || '{host} is down').replace('{host}', host), NOTIFY_ICONS.down);
-    } else {
-      notifyOS(this.config.notifyTitle, (this.config.msgUp || '{host} is back online').replace('{host}', host), NOTIFY_ICONS.up);
+    const now = Date.now();
+
+    if (this.wasDown === null) { this.wasDown = isDown; if (isDown) this.downAt = now; return; }
+
+    if (isDown !== this.wasDown) {
+      this.wasDown = isDown;
+      if (isDown) {
+        this.downAt = now;
+        this.lastAlertAt = now;
+        const msg = (this.config.msgDown || '{host} is down').replace('{host}', host);
+        if (this.config.notify) notifyOS(this.config.notifyTitle, msg, NOTIFY_ICONS.down);
+        this._webhook('down', host, { reason: this.lastReason || 'error', code: this.lastCode });
+      } else {
+        this.lastDownDur = this.downAt ? (now - this.downAt) : 0;
+        const dur = this.lastDownDur ? ` (${this._fmtDur(this.lastDownDur)})` : '';
+        const msg = (this.config.msgUp || '{host} is back online').replace('{host}', host) + dur;
+        if (this.config.notify) notifyOS(this.config.notifyTitle, msg, NOTIFY_ICONS.up);
+        this._webhook('up', host, { downtimeSec: Math.round(this.lastDownDur / 1000), latencyMs: this.lastMs });
+      }
+      return;
     }
+
+    // still down → repeat alert every N minutes
+    if (isDown && this.config.notify && this.config.repeatAlertMin > 0) {
+      if (now - this.lastAlertAt >= this.config.repeatAlertMin * 60000) {
+        this.lastAlertAt = now;
+        const dur = this.downAt ? ` (${this._fmtDur(now - this.downAt)})` : '';
+        const msg = (this.config.msgDown || '{host} is down').replace('{host}', host) + dur;
+        notifyOS(this.config.notifyTitle, msg, NOTIFY_ICONS.down);
+      }
+    }
+  }
+
+  _webhook(event, host, extra) {
+    if (!this.config.webhookUrl) return;
+    const text = event === 'down'
+      ? `🔴 ${host} is DOWN`
+      : `🟢 ${host} is back UP${this.lastDownDur ? ` (down ${this._fmtDur(this.lastDownDur)})` : ''}`;
+    // include both Slack (text) and Discord (content) keys + structured fields
+    postWebhook(this.config.webhookUrl, Object.assign({
+      text, content: text, event, host,
+      status: this.status, time: new Date().toISOString(), plugin: 'Uptime Monitor'
+    }, extra || {}));
   }
 
   cycleGraph() {
@@ -618,6 +885,11 @@ class UptimeMonitor {
         warnMs: this.config.warnMs,
         theme: this.config.theme,
         graphMode: this.config.graphMode,
+        certDays: this.certDays,
+        certWarn: (this.config.sslWarnDays > 0 && this.certDays != null && this.certDays <= this.config.sslWarnDays),
+        stats24: this._windowStats(24),
+        stats7: this._windowStats(168),
+        p95: this.p95,
         labels: this.config.labels,
         animFrame: this.animFrame,
         blinkOn: this.blinkOn

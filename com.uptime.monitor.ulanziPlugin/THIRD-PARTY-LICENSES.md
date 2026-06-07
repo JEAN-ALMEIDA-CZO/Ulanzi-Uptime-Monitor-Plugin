@@ -9,7 +9,7 @@ respective authors and is distributed under its own license.
 | `libs/node/*`, `libs/js/*` | Ulanzi UlanziDeck SDK | © Ulanzi | © Ulanzi Technology |
 
 No external online services are used. Uptime checks are plain HTTP/HTTPS requests
-made directly to the URL the user configures, via Node's built-in `http`/`https`
+made directly to the URL the user configures, via Node's built-in `http`/`https`/`net`
 modules — no third-party API, no telemetry, no API keys.
 
 ## Desktop notifications

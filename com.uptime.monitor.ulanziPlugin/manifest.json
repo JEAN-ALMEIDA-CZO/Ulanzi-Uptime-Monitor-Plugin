@@ -5,7 +5,7 @@
   "Category": "Uptime Monitor",
   "CategoryIcon": "assets/icons/categoryIcon.svg",
   "Icon": "assets/icons/brand.svg",
-  "Version": "1.0.0",
+  "Version": "1.2.0",
   "UUID": "com.uptime.monitor.deck",
   "Type": "JavaScript",
   "CodePath": "plugin/app.js",
@@ -23,13 +23,21 @@
           "Image": "assets/icons/actionIcon.svg"
         }
       ],
-      "Controllers": ["Keypad"],
+      "Controllers": [
+        "Keypad"
+      ],
       "SupportedInMultiActions": false
     }
   ],
   "OS": [
-    { "Platform": "windows", "MinimumVersion": "10" },
-    { "Platform": "mac",     "MinimumVersion": "10.11" }
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    },
+    {
+      "Platform": "mac",
+      "MinimumVersion": "10.11"
+    }
   ],
   "Software": {
     "MinVersion": "2.1.0"
