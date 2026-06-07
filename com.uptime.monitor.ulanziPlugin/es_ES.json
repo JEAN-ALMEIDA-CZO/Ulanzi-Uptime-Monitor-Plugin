@@ -1,0 +1,40 @@
+{
+  "Name": "Monitor de Disponibilidad",
+  "Description": "Monitor de disponibilidad de sitio/servidor con gráfico de latencia en tiempo real.",
+  "Actions": [
+    {
+      "Name": "Monitor de Disponibilidad",
+      "Tooltip": "Pulsa para alternar gráficos · define la URL en el panel."
+    }
+  ],
+  "Localization": {
+    "Monitor": "Monitor",
+    "URL / Domain": "URL / Dominio",
+    "Check every": "Comprobar cada",
+    "seconds": "segundos",
+    "Slow above": "Lento por encima de",
+    "ms (orange)": "ms (naranja)",
+    "Timeout": "Tiempo de espera",
+    "ms": "ms",
+    "Theme": "Tema",
+    "Check now": "Comprobar ahora",
+    "Tutorial": "Tutorial",
+    "Press the key to re-check instantly.": "Pulsa la tecla para volver a comprobar al instante.",
+    "UP": "ONLINE",
+    "SLOW": "LENTO",
+    "DOWN": "CAÍDO",
+    "CHECK": "COMPR",
+    "uptime": "disponib.",
+    "waiting": "esperando…",
+    "Graph": "Gráfico",
+    "Bars": "Barras",
+    "Line": "Línea",
+    "Minimal": "Mínimo",
+    "Tip: press the key to cycle graphs.": "Consejo: pulsa la tecla para alternar los gráficos.",
+    "Notifications": "Notificaciones",
+    "Desktop alert": "Alerta de escritorio",
+    "when down / recovered": "al caer / recuperarse",
+    "msg_down": "{host} está caído",
+    "msg_up": "{host} volvió a estar en línea"
+  }
+}

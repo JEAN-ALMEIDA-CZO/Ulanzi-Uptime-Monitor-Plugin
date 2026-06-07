@@ -1,0 +1,40 @@
+{
+  "Name": "가동 모니터",
+  "Description": "실시간 지연 그래프가 있는 웹사이트/서버 가동 모니터.",
+  "Actions": [
+    {
+      "Name": "가동 모니터",
+      "Tooltip": "누르면 그래프 전환 · 패널에서 URL 설정."
+    }
+  ],
+  "Localization": {
+    "Monitor": "모니터",
+    "URL / Domain": "URL / 도메인",
+    "Check every": "확인 간격",
+    "seconds": "초",
+    "Slow above": "느림 기준",
+    "ms (orange)": "ms (주황)",
+    "Timeout": "시간 초과",
+    "ms": "ms",
+    "Theme": "테마",
+    "Check now": "지금 확인",
+    "Tutorial": "튜토리얼",
+    "Press the key to re-check instantly.": "키를 누르면 즉시 다시 확인합니다.",
+    "UP": "정상",
+    "SLOW": "느림",
+    "DOWN": "다운",
+    "CHECK": "확인중",
+    "uptime": "가동률",
+    "waiting": "대기 중…",
+    "Graph": "그래프",
+    "Bars": "막대",
+    "Line": "선",
+    "Minimal": "미니멀",
+    "Tip: press the key to cycle graphs.": "팁: 키를 누르면 그래프가 전환됩니다.",
+    "Notifications": "알림",
+    "Desktop alert": "데스크톱 알림",
+    "when down / recovered": "다운/복구 시",
+    "msg_down": "{host} 다운됨",
+    "msg_up": "{host} 복구됨"
+  }
+}

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no">
+  <title>Uptime Monitor</title>
+  <link rel="stylesheet" href="../libs/css/udpi.css">
+  <style>
+    body { padding-bottom: 12px; }
+    :root { --accent: #22c55e; }
+
+    .section { margin: 0 0 4px; border-top: 1px solid #2a2a2a; }
+    .section:first-of-type { border-top: none; }
+    .section-title {
+      font-size: 8.5pt; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; color: var(--accent); padding: 12px 16px 4px;
+    }
+
+    input[type="text"]:focus, input[type="number"]:focus, select:focus { border-color: var(--accent) !important; outline: none; }
+    input[type="range"], select { accent-color: var(--accent); }
+
+    .row { display: flex; align-items: center; min-height: 34px; padding: 2px 16px; }
+    .row .label { flex: 0 0 110px; text-align: right; padding-right: 10px; font-size: 9pt; color: #c0c0c0; }
+    .row .control { flex: 1; display: flex; align-items: center; gap: 6px; }
+
+    input[type="text"], input[type="number"], select {
+      background: #2d2d2d; border: 1px solid #4a4a4a; color: #f0f0f0;
+      border-radius: 5px; padding: 6px 8px; font-size: 9pt; width: 100%; box-sizing: border-box;
+    }
+    input[type="number"] { width: 78px; flex: 0 0 auto; }
+    .unit { font-size: 8.5pt; color: #888; }
+
+    /* preview */
+    .preview-wrap { display: flex; justify-content: center; padding: 12px 0 6px; }
+    .preview-key {
+      width: 116px; height: 116px; border-radius: 18px; overflow: hidden;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+    }
+    .preview-key svg { width: 100%; height: 100%; display: block; }
+
+    /* theme swatches */
+    .swatches { display: flex; flex-wrap: wrap; gap: 7px; padding: 4px 16px 8px; }
+    .theme-swatch {
+      width: 30px; height: 22px; border-radius: 5px; cursor: pointer; overflow: hidden;
+      display: flex; border: 2px solid transparent; transition: border-color .15s, transform .1s;
+    }
+    .theme-swatch:hover { transform: translateY(-1px); }
+    .theme-swatch.active { border-color: #fff; }
+    .theme-swatch i { flex: 1; display: block; }
+
+    .btn-row { display: flex; gap: 8px; padding: 8px 16px 2px; }
+    .act-btn {
+      flex: 1; background: #2d2d2d; border: 1px solid #4a4a4a; color: #eaeaea;
+      border-radius: 6px; padding: 8px 10px; font-size: 9pt; font-weight: 600; cursor: pointer;
+      transition: background .15s, border-color .15s;
+    }
+    .act-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .act-btn.primary { background: var(--accent); border-color: var(--accent); color: #06210f; }
+    .act-btn.primary:hover { filter: brightness(1.07); color: #06210f; }
+
+    .tip { text-align: center; font-size: 8pt; color: #777; margin: 8px 16px 0; }
+    .hidden { display: none; }
+
+    /* segmented graph-mode buttons */
+    .seg { display: flex; gap: 6px; padding: 4px 16px 4px; }
+    .seg button {
+      flex: 1; background: #2d2d2d; border: 1px solid #4a4a4a; color: #cfcfcf;
+      border-radius: 6px; padding: 7px 4px; font-size: 8.5pt; font-weight: 600;
+      cursor: pointer; transition: all .15s;
+    }
+    .seg button:hover { border-color: var(--accent); }
+    .seg button.active { background: var(--accent); border-color: var(--accent); color: #06210f; }
+
+    /* toggle switch (udpi.css hides raw checkboxes) */
+    .switch { position: relative; width: 40px; height: 22px; flex: 0 0 40px; }
+    .switch input { display: none; }
+    .switch .track {
+      position: absolute; inset: 0; border-radius: 22px;
+      background: #444; transition: background .2s; cursor: pointer;
+    }
+    .switch .track::after {
+      content: ""; position: absolute; top: 2px; left: 2px;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #ddd; transition: transform .2s;
+    }
+    .switch input:checked + .track { background: var(--accent); }
+    .switch input:checked + .track::after { transform: translateX(18px); }
+  </style>
+</head>
+<body>
+  <div class="udpi-wrapper hidden">
+    <form id="property-inspector">
+
+      <div class="preview-wrap"><div id="preview" class="preview-key"></div></div>
+
+      <div class="section">
+        <div class="section-title" data-localize>Monitor</div>
+        <div class="row">
+          <div class="label" data-localize>URL / Domain</div>
+          <div class="control">
+            <input type="text" id="url" name="url" placeholder="example.com" autocomplete="off" spellcheck="false">
+          </div>
+        </div>
+        <div class="row">
+          <div class="label" data-localize>Check every</div>
+          <div class="control">
+            <input type="number" id="intervalSec" name="intervalSec" min="3" max="3600" value="5">
+            <span class="unit" data-localize>seconds</span>
+          </div>
+        </div>
+        <div class="row">
+          <div class="label" data-localize>Slow above</div>
+          <div class="control">
+            <input type="number" id="warnMs" name="warnMs" min="50" max="10000" step="50" value="800">
+            <span class="unit" data-localize>ms (orange)</span>
+          </div>
+        </div>
+        <div class="row">
+          <div class="label" data-localize>Timeout</div>
+          <div class="control">
+            <input type="number" id="timeoutMs" name="timeoutMs" min="1000" max="30000" step="500" value="8000">
+            <span class="unit" data-localize>ms</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title" data-localize>Graph</div>
+        <div class="seg" id="graph-seg">
+          <button type="button" data-mode="0" data-localize>Bars</button>
+          <button type="button" data-mode="1" data-localize>Line</button>
+          <button type="button" data-mode="2" data-localize>Minimal</button>
+        </div>
+        <input type="hidden" id="graphMode" name="graphMode" value="0">
+        <p class="tip" style="margin-top:2px" data-localize>Tip: press the key to cycle graphs.</p>
+      </div>
+
+      <div class="section">
+        <div class="section-title" data-localize>Notifications</div>
+        <div class="row">
+          <div class="label" data-localize>Desktop alert</div>
+          <div class="control">
+            <label class="switch"><input type="checkbox" id="notify" name="notify"><span class="track"></span></label>
+            <span class="unit" data-localize>when down / recovered</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title" data-localize>Theme</div>
+        <div class="swatches" id="theme-swatches"></div>
+        <input type="hidden" name="theme" id="theme" value="midnight">
+      </div>
+
+    </form>
+
+    <div class="btn-row">
+      <button class="act-btn primary" id="btn-check" type="button" data-localize>Check now</button>
+      <button class="act-btn" id="btn-tutorial" type="button" data-localize>Tutorial</button>
+    </div>
+
+    <p class="tip" data-localize>Press the key to re-check instantly.</p>
+  </div>
+
+  <script src="../libs/js/constants.js"></script>
+  <script src="../libs/js/eventEmitter.js"></script>
+  <script src="../libs/js/timers.js"></script>
+  <script src="../libs/js/utils.js"></script>
+  <script src="../libs/js/ulanzideckApi.js"></script>
+  <script src="./inspector.js"></script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "Author": "Jean Almeida",
+  "Name": "Uptime Monitor",
+  "Description": "Monitor any website or server right from your Ulanzi Deck. Enter a URL and the key shows a live status with a real-time latency graph: green when up, orange on instability/high latency, and a blinking red when it goes down. Configurable check interval and thresholds, modern animated UI, and full localization. Keep an eye on your sites, APIs and services at a glance.",
+  "Category": "Uptime Monitor",
+  "CategoryIcon": "assets/icons/categoryIcon.svg",
+  "Icon": "assets/icons/brand.svg",
+  "Version": "1.0.0",
+  "UUID": "com.uptime.monitor.deck",
+  "Type": "JavaScript",
+  "CodePath": "plugin/app.js",
+  "PrivateAPI": true,
+  "SupportedInMultiActions": false,
+  "Actions": [
+    {
+      "Name": "Uptime Monitor",
+      "Icon": "assets/icons/actionIcon.svg",
+      "UUID": "com.uptime.monitor.deck.monitor",
+      "PropertyInspectorPath": "property-inspector/inspector.html",
+      "States": [
+        {
+          "Name": "Default",
+          "Image": "assets/icons/actionIcon.svg"
+        }
+      ],
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false
+    }
+  ],
+  "OS": [
+    { "Platform": "windows", "MinimumVersion": "10" },
+    { "Platform": "mac",     "MinimumVersion": "10.11" }
+  ],
+  "Software": {
+    "MinVersion": "2.1.0"
+  }
+}

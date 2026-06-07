@@ -1,0 +1,40 @@
+{
+  "Name": "运行时间监控",
+  "Description": "带实时延迟图表的网站/服务器可用性监控。",
+  "Actions": [
+    {
+      "Name": "运行时间监控",
+      "Tooltip": "按键切换图表 · 在面板设置 URL。"
+    }
+  ],
+  "Localization": {
+    "Monitor": "监控",
+    "URL / Domain": "URL / 域名",
+    "Check every": "检查间隔",
+    "seconds": "秒",
+    "Slow above": "慢于",
+    "ms (orange)": "毫秒（橙色）",
+    "Timeout": "超时",
+    "ms": "毫秒",
+    "Theme": "主题",
+    "Check now": "立即检查",
+    "Tutorial": "教程",
+    "Press the key to re-check instantly.": "按下按键即可立即重新检查。",
+    "UP": "在线",
+    "SLOW": "缓慢",
+    "DOWN": "离线",
+    "CHECK": "检查",
+    "uptime": "可用率",
+    "waiting": "等待中…",
+    "Graph": "图表",
+    "Bars": "柱状",
+    "Line": "折线",
+    "Minimal": "极简",
+    "Tip: press the key to cycle graphs.": "提示：按下按键可切换图表。",
+    "Notifications": "通知",
+    "Desktop alert": "桌面提醒",
+    "when down / recovered": "宕机/恢复时",
+    "msg_down": "{host} 已离线",
+    "msg_up": "{host} 已恢复"
+  }
+}

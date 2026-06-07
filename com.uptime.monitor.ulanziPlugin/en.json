@@ -1,0 +1,40 @@
+{
+  "Name": "Uptime Monitor",
+  "Description": "Live website/server uptime monitor with a real-time latency graph.",
+  "Actions": [
+    {
+      "Name": "Uptime Monitor",
+      "Tooltip": "Press to cycle graphs · set the URL in the panel."
+    }
+  ],
+  "Localization": {
+    "Monitor": "Monitor",
+    "URL / Domain": "URL / Domain",
+    "Check every": "Check every",
+    "seconds": "seconds",
+    "Slow above": "Slow above",
+    "ms (orange)": "ms (orange)",
+    "Timeout": "Timeout",
+    "ms": "ms",
+    "Theme": "Theme",
+    "Check now": "Check now",
+    "Tutorial": "Tutorial",
+    "Press the key to re-check instantly.": "Press the key to re-check instantly.",
+    "UP": "UP",
+    "SLOW": "SLOW",
+    "DOWN": "DOWN",
+    "CHECK": "CHECK",
+    "uptime": "uptime",
+    "waiting": "waiting…",
+    "Graph": "Graph",
+    "Bars": "Bars",
+    "Line": "Line",
+    "Minimal": "Minimal",
+    "Tip: press the key to cycle graphs.": "Tip: press the key to cycle graphs.",
+    "Notifications": "Notifications",
+    "Desktop alert": "Desktop alert",
+    "when down / recovered": "when down / recovered",
+    "msg_down": "{host} is down",
+    "msg_up": "{host} is back online"
+  }
+}

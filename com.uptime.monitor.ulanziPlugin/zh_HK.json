@@ -1,0 +1,40 @@
+{
+  "Name": "運行時間監控",
+  "Description": "帶實時延遲圖表的網站/伺服器可用性監控。",
+  "Actions": [
+    {
+      "Name": "運行時間監控",
+      "Tooltip": "按鍵切換圖表 · 在面板設定 URL。"
+    }
+  ],
+  "Localization": {
+    "Monitor": "監控",
+    "URL / Domain": "URL / 網域",
+    "Check every": "檢查間隔",
+    "seconds": "秒",
+    "Slow above": "慢於",
+    "ms (orange)": "毫秒（橙色）",
+    "Timeout": "逾時",
+    "ms": "毫秒",
+    "Theme": "主題",
+    "Check now": "立即檢查",
+    "Tutorial": "教學",
+    "Press the key to re-check instantly.": "按下按鍵即可立即重新檢查。",
+    "UP": "在線",
+    "SLOW": "緩慢",
+    "DOWN": "離線",
+    "CHECK": "檢查",
+    "uptime": "可用率",
+    "waiting": "等待中…",
+    "Graph": "圖表",
+    "Bars": "長條",
+    "Line": "折線",
+    "Minimal": "極簡",
+    "Tip: press the key to cycle graphs.": "提示：按下按鍵可切換圖表。",
+    "Notifications": "通知",
+    "Desktop alert": "桌面提醒",
+    "when down / recovered": "當機/恢復時",
+    "msg_down": "{host} 已離線",
+    "msg_up": "{host} 已恢復"
+  }
+}

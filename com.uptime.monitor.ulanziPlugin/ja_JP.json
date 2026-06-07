@@ -1,0 +1,40 @@
+{
+  "Name": "稼働モニター",
+  "Description": "リアルタイムのレイテンシグラフ付きウェブサイト/サーバー稼働監視。",
+  "Actions": [
+    {
+      "Name": "稼働モニター",
+      "Tooltip": "押すとグラフ切替・URLはパネルで設定。"
+    }
+  ],
+  "Localization": {
+    "Monitor": "モニター",
+    "URL / Domain": "URL / ドメイン",
+    "Check every": "チェック間隔",
+    "seconds": "秒",
+    "Slow above": "遅い基準",
+    "ms (orange)": "ms（オレンジ）",
+    "Timeout": "タイムアウト",
+    "ms": "ms",
+    "Theme": "テーマ",
+    "Check now": "今すぐ確認",
+    "Tutorial": "チュートリアル",
+    "Press the key to re-check instantly.": "キーを押すとすぐに再チェックします。",
+    "UP": "稼働",
+    "SLOW": "遅延",
+    "DOWN": "停止",
+    "CHECK": "確認中",
+    "uptime": "稼働率",
+    "waiting": "待機中…",
+    "Graph": "グラフ",
+    "Bars": "バー",
+    "Line": "折れ線",
+    "Minimal": "ミニマル",
+    "Tip: press the key to cycle graphs.": "ヒント：キーを押すとグラフが切り替わります。",
+    "Notifications": "通知",
+    "Desktop alert": "デスクトップ通知",
+    "when down / recovered": "ダウン時／復旧時",
+    "msg_down": "{host} がダウンしました",
+    "msg_up": "{host} が復旧しました"
+  }
+}

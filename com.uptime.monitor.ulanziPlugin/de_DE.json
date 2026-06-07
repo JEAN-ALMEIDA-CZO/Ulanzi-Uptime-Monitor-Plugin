@@ -1,0 +1,40 @@
+{
+  "Name": "Verfügbarkeits-Monitor",
+  "Description": "Live-Verfügbarkeitsmonitor für Website/Server mit Echtzeit-Latenzdiagramm.",
+  "Actions": [
+    {
+      "Name": "Verfügbarkeits-Monitor",
+      "Tooltip": "Drücken zum Wechseln der Diagramme · URL im Panel festlegen."
+    }
+  ],
+  "Localization": {
+    "Monitor": "Überwachung",
+    "URL / Domain": "URL / Domain",
+    "Check every": "Prüfen alle",
+    "seconds": "Sekunden",
+    "Slow above": "Langsam über",
+    "ms (orange)": "ms (orange)",
+    "Timeout": "Zeitlimit",
+    "ms": "ms",
+    "Theme": "Design",
+    "Check now": "Jetzt prüfen",
+    "Tutorial": "Anleitung",
+    "Press the key to re-check instantly.": "Taste drücken, um sofort neu zu prüfen.",
+    "UP": "ONLINE",
+    "SLOW": "LANGSAM",
+    "DOWN": "OFFLINE",
+    "CHECK": "PRÜFE",
+    "uptime": "Verfügb.",
+    "waiting": "warten…",
+    "Graph": "Diagramm",
+    "Bars": "Balken",
+    "Line": "Linie",
+    "Minimal": "Minimal",
+    "Tip: press the key to cycle graphs.": "Tipp: Taste drücken, um Diagramme zu wechseln.",
+    "Notifications": "Benachrichtigungen",
+    "Desktop alert": "Desktop-Hinweis",
+    "when down / recovered": "bei Ausfall / Wiederherstellung",
+    "msg_down": "{host} ist offline",
+    "msg_up": "{host} ist wieder online"
+  }
+}
