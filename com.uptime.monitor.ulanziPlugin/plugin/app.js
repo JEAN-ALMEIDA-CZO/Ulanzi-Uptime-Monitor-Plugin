@@ -10,7 +10,7 @@ import { exec, execFile } from 'child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ICON_DIR = path.join(__dirname, '..', 'assets', 'icons');
-const PLUGIN_VERSION = '1.2.0';
+const PLUGIN_VERSION = '1.2.1';
 
 // Persistent data dir (hourly uptime buckets survive reloads → 24h / 7d windows)
 const DATA_DIR = (os.platform() === 'darwin')
@@ -405,8 +405,8 @@ function buildGraph(p) {
       ? `<line x1="${gx0}" y1="${ty.toFixed(1)}" x2="${gx1}" y2="${ty.toFixed(1)}" stroke="${t.slow}" stroke-width="1.3" stroke-dasharray="4 4" opacity="0.7"/>` +
         `<text x="${gx0 + 2}" y="${(ty - 3).toFixed(1)}" fill="${t.slow}" font-size="13" font-family="Arial, Helvetica, sans-serif" opacity="0.9">${warn}ms</text>`
       : '';
-    const peakLabel = (peak > 0 && !flash)
-      ? `<text x="${gx1}" y="${gy0 - 4}" text-anchor="end" fill="${t.muted}" font-size="15" font-family="Arial, Helvetica, sans-serif">▲ ${peak} ms</text>`
+    const peakLabel = (peak > 0)
+      ? `<text x="${gx1}" y="${gy0 - 4}" text-anchor="end" fill="${flash ? t.bg : t.muted}" font-size="15" font-family="Arial, Helvetica, sans-serif">▲ ${peak} ms</text>`
       : '';
     return { graph, threshLine, peakLabel, gradDef };
   }
@@ -494,7 +494,7 @@ function generateSVG(o) {
   let graph = '', threshLine = '', peakLabel = '', gradDef = '', baseline = '', minimalBody = '';
   if (gm === 2) {
     // minimal: drop the chart, show a big status word + the 7-day uptime
-    const u7 = (o.stats7 && o.stats7.uptime != null) ? `<text x="128" y="216" text-anchor="middle" fill="${t.muted}" font-size="14" font-family="Arial, Helvetica, sans-serif">7d ${o.stats7.uptime}%</text>` : '';
+    const u7 = (o.stats7 && o.stats7.uptime != null) ? `<text x="128" y="220" text-anchor="middle" fill="${t.muted}" font-size="19" font-weight="bold" font-family="Arial, Helvetica, sans-serif">7d ${o.stats7.uptime}%</text>` : '';
     minimalBody = `<text x="128" y="188" text-anchor="middle" fill="${accent}" font-size="34" font-weight="bold" font-family="Arial, Helvetica, sans-serif" letter-spacing="1" opacity="${slowPulse.toFixed(2)}">${esc(statusText)}</text>${u7}`;
   } else {
     const g = buildGraph({ hist, warn, okVals, peak, gx0, gx1, gy0, gy1, gw, gh, t, flash, statusColor, pingGraph: gm === 1, waiting: esc(L.waiting || 'waiting…') });
@@ -502,14 +502,15 @@ function generateSVG(o) {
     baseline = `<line x1="${gx0}" y1="${gy1}" x2="${gx1}" y2="${gy1}" stroke="${flash ? t.bg : t.track}" stroke-width="2"/>`;
   }
 
-  // top-right: 24h uptime (or the SSL badge when the cert is expiring)
+  // top-right: 24h uptime (or the SSL badge when the cert is expiring).
+  // Inverts with the down-blink (accent already flips to t.bg on flash) so it
+  // alternates in sync with the rest of the key.
   const s24 = o.stats24 || {};
-  const topRight = flash ? ''
-    : (o.certWarn
-        ? `<text x="234" y="40" text-anchor="end" fill="${t.slow}" font-size="16" font-weight="bold" font-family="Arial, Helvetica, sans-serif">SSL ${o.certDays}d</text>`
-        : (s24.uptime != null
-            ? `<text x="234" y="40" text-anchor="end" fill="${accent}" font-size="17" font-weight="bold" font-family="Arial, Helvetica, sans-serif">24h ${s24.uptime}%</text>`
-            : ''));
+  const topRight = o.certWarn
+    ? `<text x="234" y="40" text-anchor="end" fill="${flash ? t.bg : t.slow}" font-size="16" font-weight="bold" font-family="Arial, Helvetica, sans-serif">SSL ${o.certDays}d</text>`
+    : (s24.uptime != null
+        ? `<text x="234" y="40" text-anchor="end" fill="${accent}" font-size="17" font-weight="bold" font-family="Arial, Helvetica, sans-serif">24h ${s24.uptime}%</text>`
+        : '');
   // bottom row: latency stats, bigger so they're readable (avg + p95)
   const botLeft  = (s24.avg != null) ? `~${s24.avg} ms` : '';
   const botRight = (o.p95 != null) ? `p95 ${o.p95}` : (o.uptimePct != null && s24.uptime == null ? `${o.uptimePct}%` : '');
@@ -536,6 +537,29 @@ function generateSVG(o) {
 }
 
 // ── monitor instance (per key context) ────────────────────────────────────────
+// ── single shared animation ticker ───────────────────────────────────────────
+// One timer drives every key that needs motion (blink while down/slow, or a
+// marquee URL), instead of one 150 ms timer per key that ran forever. A stable
+// key with a short URL isn't in the set → no timer work at all. Fewer fps as
+// more keys animate, so 5 monitors cost far less than 5×.
+const _animSet = new Set();
+let _animTimer = null;
+let _startSeq = 0; // staggers each key's FIRST check so N keys don't all hit the network at once
+function _animInterval() { const n = _animSet.size; return n <= 2 ? 200 : n <= 4 ? 280 : 360; }
+function _animRestart() {
+  if (_animTimer) { clearInterval(_animTimer); _animTimer = null; }
+  if (_animSet.size) _animTimer = setInterval(() => {
+    for (const it of _animSet) {
+      it.animFrame++;
+      const unstable = it.status === 'down' || it.status === 'slow';
+      if (unstable && it.animFrame % 3 === 0) it.blinkOn = !it.blinkOn;
+      it.render();
+    }
+  }, _animInterval());
+}
+function animJoin(inst) { _animSet.add(inst); _animRestart(); }
+function animLeave(inst) { _animSet.delete(inst); _animRestart(); }
+
 class UptimeMonitor {
   constructor(context, $UD) {
     this.context = context;
@@ -665,18 +689,35 @@ class UptimeMonitor {
       this.buckets = this._loadBuckets();
     }
 
+    // Only (re)start the check loop when a CHECK-relevant setting changed (url / type /
+    // interval / paused) or the timer isn't running yet. A labels/theme/graphMode push
+    // must NOT reset the timer — otherwise repeated settings pushes kept resetting the
+    // 5 s interval and it "pinged once then froze".
+    const checkRelevant = (this.config.url !== prevUrl || this.config.checkType !== prevType ||
+                           this.config.intervalSec !== prevInterval || this.config.paused !== prevPaused);
+
     // paused → show PAUSED and stop checking
     if (this.config.paused) {
       this.status = 'paused';
-      this._startLoops();
+      if (checkRelevant || this.checkTimer) this._startLoops(); // clears the check timer
       this.render();
       return;
     }
 
-    this._startLoops();
+    if (checkRelevant || !this.checkTimer) this._startLoops();
+    else this._updateAnim();
     if (this.config.url && (this.config.url !== prevUrl || this.config.checkType !== prevType || this.config.intervalSec !== prevInterval || prevPaused || this.history.length === 0)) {
       if (this.status === 'paused') this.status = 'checking';
-      this.checkNow();
+      if (!this._didFirstCheck) {
+        // first check after load: stagger so 7 keys don't all fire at once
+        this._didFirstCheck = true;
+        const slot = Math.min(_startSeq++, 12);
+        this.render(); // show 'checking' while waiting for its slot
+        if (this._firstT) clearTimeout(this._firstT);
+        this._firstT = setTimeout(() => this.checkNow(), slot * 300);
+      } else {
+        this.checkNow(); // user edit → immediate feedback
+      }
     } else {
       this.render();
     }
@@ -723,25 +764,25 @@ class UptimeMonitor {
     const ms = Math.max(3, this.config.intervalSec) * 1000;
     if (this.checkTimer) clearInterval(this.checkTimer);
     this.checkTimer = this.config.paused ? null : setInterval(() => this.checkNow(), ms);
+    this._updateAnim();
+  }
 
-    if (!this.animTimer) {
-      // ~6 fps loop (cheap; only rebuilds the icon). Runs continuously while the
-      // status is unstable (blink/pulse) OR the URL needs to scroll (marquee).
-      this.animTimer = setInterval(() => {
-        this.animFrame++;
-        const unstable = this.status === 'down' || this.status === 'slow';
-        if (unstable && this.animFrame % 3 === 0) this.blinkOn = !this.blinkOn;
-        if (unstable || this.needsMarquee) this.render();
-      }, 150);
-    }
+  // Join/leave the single shared ticker: only blink (down/slow) or a scrolling
+  // marquee URL need motion. A stable, short-URL key animates nothing.
+  _updateAnim() {
+    const need = this.status === 'down' || this.status === 'slow' || this.needsMarquee;
+    if (need === this._animNeed) return;   // unchanged → don't churn the timer
+    this._animNeed = need;
+    if (need) { animJoin(this); }
+    else { animLeave(this); this.blinkOn = false; }
   }
 
   async checkNow() {
-    if (this.config.paused) { this.status = 'paused'; this.render(); return; }
-    if (!this.config.url) { this.status = 'checking'; this.render(); return; }
+    if (this.config.paused) { this.status = 'paused'; this._updateAnim(); this.render(); return; }
+    if (!this.config.url) { this.status = 'checking'; this._updateAnim(); this.render(); return; }
     // TCP mode needs an explicit port (host:port)
     if (this.config.checkType === 'tcp' && !parseHostPort(this.config.url).port) {
-      this.status = 'checking'; this.render(); return;
+      this.status = 'checking'; this._updateAnim(); this.render(); return;
     }
     if (this._busy) return;
     this._busy = true;
@@ -797,6 +838,7 @@ class UptimeMonitor {
     } finally {
       this._busy = false;
       this._maybeNotify();
+      this._updateAnim();
       this.render();
     }
   }
@@ -896,6 +938,8 @@ class UptimeMonitor {
       });
       // setBaseDataIcon expects a base64 data-URI, not raw SVG (raw → black key)
       const dataUri = 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64');
+      if (dataUri === this._lastUri) return; // skip redundant WS pushes (no visual change)
+      this._lastUri = dataUri;
       this.$UD.setBaseDataIcon(this.context, dataUri);
     } catch (e) {
       console.error('[Uptime] render error:', e.message);
@@ -904,7 +948,8 @@ class UptimeMonitor {
 
   destroy() {
     if (this.checkTimer) { clearInterval(this.checkTimer); this.checkTimer = null; }
-    if (this.animTimer) { clearInterval(this.animTimer); this.animTimer = null; }
+    if (this._firstT) { clearTimeout(this._firstT); this._firstT = null; }
+    animLeave(this);
   }
 }
 
@@ -916,8 +961,26 @@ $UD.connect('com.uptime.monitor.deck');
 $UD.onConnected(() => dlog('connected to Ulanzi'));
 $UD.onError((e) => console.error('[Uptime] Error:', typeof e === 'string' ? e : ''));
 
+// This deck NEVER fires onClear when a key is moved — it only fires onAdd for the new
+// position (same actionid, new key). Without cleanup the old-position instance leaks:
+// it keeps its check timer + animation and both paint the same action → flicker, and
+// the live count grows unbounded. actionid is UNIQUE per placed instance (verified), so
+// dropping same-actionid instances at a DIFFERENT context is safe — it only removes the
+// moved key's previous position, never a sibling key (which has a different actionid).
+function dropStaleFor(ctx) {
+  let actionid;
+  try { actionid = $UD.decodeContext(ctx).actionid; } catch (e) { return; }
+  if (!actionid) return;
+  for (const k of Object.keys(CACHES)) {
+    if (k === ctx) continue;
+    let a; try { a = $UD.decodeContext(k).actionid; } catch (e) { continue; }
+    if (a === actionid) { CACHES[k].destroy(); delete CACHES[k]; }
+  }
+}
+
 $UD.onAdd((jsn) => {
   const ctx = jsn.context;
+  dropStaleFor(ctx);
   if (!CACHES[ctx]) CACHES[ctx] = new UptimeMonitor(ctx, $UD);
   if (jsn.param) CACHES[ctx].setConfig(jsn.param);
   else CACHES[ctx].render();
@@ -936,7 +999,7 @@ $UD.onParamFromPlugin((jsn) => {
 // press the key → cycle the graph mode (bars → line → minimal) and persist it
 $UD.onRun((jsn) => {
   const ctx = jsn.context;
-  if (!CACHES[ctx]) CACHES[ctx] = new UptimeMonitor(ctx, $UD);
+  if (!CACHES[ctx]) { dropStaleFor(ctx); CACHES[ctx] = new UptimeMonitor(ctx, $UD); }
   CACHES[ctx].cycleGraph();
 });
 

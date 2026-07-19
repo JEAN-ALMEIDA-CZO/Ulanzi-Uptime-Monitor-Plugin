@@ -33,9 +33,15 @@ class UlanziStreamDeck {
     this.websocket.onerror  = (evt) => { const e = `WS ERROR: ${evt}, ${SocketErrors.DEFAULT}`; Utils.warn(e); this.emit(Events.ERROR, e); };
     this.websocket.onclose  = ()    => { Utils.warn('WS CLOSED'); this.emit(Events.CLOSE); };
 
+    // real plugin/PI events must never be dropped by the generic filter — they can
+    // arrive with a code + a non-REQUEST cmdType. In particular 'paramfromapp'
+    // delivers the saved settings when the panel is (re)opened; dropping it left the
+    // form empty and wiped the saved URL on the next edit.
+    const _PASS = ['add', 'run', 'paramfromapp', 'paramfromplugin', 'setactive', 'clear', 'keydown', 'keyup', 'connected'];
     this.websocket.onmessage = (evt) => {
       const data = evt?.data ? JSON.parse(evt.data) : null;
-      if (!data || (typeof data.code !== 'undefined' && data.cmdType !== 'REQUEST')) return;
+      if (!data) return;
+      if (!_PASS.includes(data.cmd) && typeof data.code !== 'undefined' && data.cmdType !== 'REQUEST') return;
 
       if (!this.key      && data.uuid === this.uuid && data.key)      this.key      = data.key;
       if (!this.actionid && data.uuid === this.uuid && data.actionid) this.actionid = data.actionid;

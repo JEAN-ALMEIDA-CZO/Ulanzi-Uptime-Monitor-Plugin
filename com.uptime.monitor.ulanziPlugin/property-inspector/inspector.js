@@ -123,7 +123,10 @@ function highlightTheme(name) {
 const pv = { frame: 0, history: [], status: 'up', phaseFrame: 0, blink: false };
 let previewTimer = null;
 
-function startPreviewLoop() {
+// Live animated preview removed: it ran a ~6.6 fps SVG loop that idled the CPU
+// (~5% per open panel). The panel now shows no moving preview.
+function startPreviewLoop() { /* disabled */ }
+function _startPreviewLoop_DISABLED() {
   // seed some history
   pv.history = [];
   for (let i = 0; i < 24; i++) pv.history.push({ ok: true, ms: 120 + Math.round(Math.random() * 180) });
@@ -204,7 +207,7 @@ function piBuildGraph(p) {
     const ty = yFor(warn);
     const threshLine = (!flash && warn > lo2 && warn < hi2)
       ? `<line x1="${gx0}" y1="${ty.toFixed(1)}" x2="${gx1}" y2="${ty.toFixed(1)}" stroke="${t.slow}" stroke-width="1.3" stroke-dasharray="4 4" opacity="0.7"/><text x="${gx0 + 2}" y="${(ty - 3).toFixed(1)}" fill="${t.slow}" font-size="13" font-family="Arial, Helvetica, sans-serif" opacity="0.9">${warn}ms</text>` : '';
-    const peakLabel = (peak > 0 && !flash) ? `<text x="${gx1}" y="${gy0 - 4}" text-anchor="end" fill="${t.muted}" font-size="15" font-family="Arial, Helvetica, sans-serif">▲ ${peak} ms</text>` : '';
+    const peakLabel = (peak > 0) ? `<text x="${gx1}" y="${gy0 - 4}" text-anchor="end" fill="${flash ? t.bg : t.muted}" font-size="15" font-family="Arial, Helvetica, sans-serif">▲ ${peak} ms</text>` : '';
     return { graph, threshLine, peakLabel, gradDef };
   }
   // bars
@@ -272,7 +275,7 @@ function buildSVG(o) {
   let p95 = null;
   if (okMs.length >= 5) { const s = [...okMs].sort((a, b) => a - b); p95 = s[Math.min(s.length - 1, Math.floor(s.length * 0.95))]; }
   const dot = `<circle cx="30" cy="34" r="7" fill="${accent}"/>`;
-  const topRight = (!flash && upPct != null) ? `<text x="234" y="40" text-anchor="end" fill="${accent}" font-size="17" font-weight="bold" font-family="Arial, Helvetica, sans-serif">24h ${upPct}%</text>` : '';
+  const topRight = (upPct != null) ? `<text x="234" y="40" text-anchor="end" fill="${accent}" font-size="17" font-weight="bold" font-family="Arial, Helvetica, sans-serif">24h ${upPct}%</text>` : '';
   const botLeft = (avg != null) ? `~${avg} ms` : '';
   const botRight = (p95 != null) ? `p95 ${p95}` : '';
 
@@ -315,7 +318,10 @@ async function loadTranslations() {
       msgDown:     loc['msg_down']   || NOTIFY.msgDown,
       msgUp:       loc['msg_up']     || NOTIFY.msgUp
     };
-    collectAndSend();
+    // Push the localized labels ONCE (not the settings — that would wipe the URL, and
+    // not on every receive — that would loop). The backend renders default English
+    // labels until this arrives.
+    $UD.sendParamFromPlugin({ ...LABELS, ...NOTIFY });
   } catch (e) {
     console.warn('[Uptime] No translations for', $UD.language);
   }
@@ -338,7 +344,12 @@ function applySettings(params) {
   if (!params || params.forceCheck) return;
   ACTION_SETTING = { ...ACTION_SETTING, ...params };
   if (!form) return;
-  Utils.setFormValue(ACTION_SETTING, form);
+  // Don't repopulate the form while the user is typing — otherwise the echo of our
+  // own debounced send arrives mid-edit and setFormValue reverts the URL field to the
+  // value from 200 ms ago, making it feel like the URL can't be edited.
+  const ae = document.activeElement;
+  const editing = !!(ae && form.contains(ae) && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT'));
+  if (!editing) Utils.setFormValue(ACTION_SETTING, form);
   // graph mode (migrate the old pingGraph boolean if present)
   let gm = ACTION_SETTING.graphMode;
   if (gm == null && ACTION_SETTING.pingGraph != null) gm = (ACTION_SETTING.pingGraph === true || ACTION_SETTING.pingGraph === 'true' || ACTION_SETTING.pingGraph === 1 || ACTION_SETTING.pingGraph === '1') ? 1 : 0;
@@ -355,7 +366,10 @@ function applySettings(params) {
   document.getElementById('theme').value = theme;
   highlightTheme(theme);
   renderPreview();
-  $UD.sendParamFromPlugin({ ...ACTION_SETTING, ...LABELS });
+  // Send NOTHING here. applySettings runs on every received push, and any send would
+  // be echoed straight back → an infinite panel↔deck loop that kept calling setConfig
+  // on the backend, resetting the check timer (pinged once then froze) and flickering.
+  // The backend already has the settings; labels are pushed once from loadTranslations.
 }
 
 $UD.onAdd((jsn) => { if (jsn.param) applySettings(jsn.param); });

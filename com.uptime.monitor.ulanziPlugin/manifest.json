@@ -5,7 +5,7 @@
   "Category": "Uptime Monitor",
   "CategoryIcon": "assets/icons/categoryIcon.svg",
   "Icon": "assets/icons/brand.svg",
-  "Version": "1.2.0",
+  "Version": "1.2.1",
   "UUID": "com.uptime.monitor.deck",
   "Type": "JavaScript",
   "CodePath": "plugin/app.js",
