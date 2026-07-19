@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://badgen.net/badge/version/1.2.1/22c55e">
+  <img alt="version" src="https://badgen.net/badge/version/1.2.0/22c55e">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-0f172a">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-22c55e">
   <img alt="i18n" src="https://img.shields.io/badge/i18n-10%20locales-3b82f6">
