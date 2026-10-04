@@ -982,7 +982,11 @@ $UD.onAdd((jsn) => {
   const ctx = jsn.context;
   dropStaleFor(ctx);
   if (!CACHES[ctx]) CACHES[ctx] = new UptimeMonitor(ctx, $UD);
-  if (jsn.param) CACHES[ctx].setConfig(jsn.param);
+  // saved settings may still hold a stale forceCheck (older PI persisted it) → it would
+  // make setConfig return before applying the URL, so drop it on load
+  const param = jsn.param ? { ...jsn.param } : null;
+  if (param) delete param.forceCheck;
+  if (param) CACHES[ctx].setConfig(param);
   else CACHES[ctx].render();
 });
 

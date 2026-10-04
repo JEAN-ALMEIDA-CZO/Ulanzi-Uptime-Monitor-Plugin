@@ -48,6 +48,10 @@ $UD.onConnected(() => {
 
   document.getElementById('btn-check').addEventListener('click', () => {
     $UD.sendParamFromPlugin({ forceCheck: Date.now() });
+    // sendParamFromPlugin MERGES into the saved settings, so forceCheck would stay
+    // persisted and every reload would be treated as a "check now" command that skips
+    // the URL → clear it right away
+    $UD.sendParamFromPlugin({ forceCheck: 0 });
     pulseButton();
   });
   document.getElementById('btn-tutorial').addEventListener('click', () => {
@@ -341,8 +345,11 @@ function collectAndSend() {
 }
 
 function applySettings(params) {
-  if (!params || params.forceCheck) return;
-  ACTION_SETTING = { ...ACTION_SETTING, ...params };
+  if (!params) return;
+  // forceCheck is a one-shot command, not a setting (older versions persisted it)
+  const { forceCheck, ...rest } = params;
+  if (!Object.keys(rest).length) return;
+  ACTION_SETTING = { ...ACTION_SETTING, ...rest };
   if (!form) return;
   // Don't repopulate the form while the user is typing — otherwise the echo of our
   // own debounced send arrives mid-edit and setFormValue reverts the URL field to the
@@ -374,4 +381,4 @@ function applySettings(params) {
 
 $UD.onAdd((jsn) => { if (jsn.param) applySettings(jsn.param); });
 $UD.onParamFromApp((jsn) => { if (jsn.param) applySettings(jsn.param); });
-$UD.onParamFromPlugin((jsn) => { if (jsn.param && !jsn.param.forceCheck) applySettings(jsn.param); });
+$UD.onParamFromPlugin((jsn) => { if (jsn.param) applySettings(jsn.param); });
